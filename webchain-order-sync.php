@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WebChain Order Sync
  * Description: Syncs WooCommerce orders to E-Talk's WebChain
- * Version: 2.9.1
+ * Version: 2.9.2
  * Author: E-Talk
  * Requires at least: 5.0
  * Requires PHP: 7.4
@@ -17,7 +17,7 @@ class WebChain_Order_Sync {
     private $api_base = 'https://e-talk.xyz/wp-json/webchain/v1';
     
     public function __construct() {
-        //error_log("WebChain: Plugin initialized at " . date('Y-m-d H:i:s'));
+        $this->log("Plugin initialized at " . date('Y-m-d H:i:s'));
         // Admin interface
         add_action('admin_menu', [$this, 'add_admin_menu']);
         add_action('admin_init', [$this, 'register_settings']);
@@ -25,7 +25,7 @@ class WebChain_Order_Sync {
         // Order handling
         add_action('woocommerce_order_status_completed', [$this, 'handle_completed_order'], 10, 1);
         add_filter('woocommerce_admin_order_actions', [$this, 'add_order_action'], 100, 2);
-        add_action('admin_head', [$this, 'add_order_action_style']);
+        add_action('admin_enqueue_scripts', [$this, 'add_order_action_style']);
         
         // AJAX handlers
         add_action('wp_ajax_webchain_test_connection', [$this, 'test_connection']);
@@ -38,7 +38,7 @@ class WebChain_Order_Sync {
     }
 
     public function add_admin_menu() {
-        error_log("WebChain: Adding admin menu at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain: Adding admin menu at " . date('Y-m-d H:i:s'));
         add_menu_page(
             'WebChain Sync',
             'WebChain',
@@ -51,7 +51,7 @@ class WebChain_Order_Sync {
     }
 
     public function register_settings() {
-        error_log("WebChain: Registering settings at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain: Registering settings at " . date('Y-m-d H:i:s'));
         register_setting('webchain_settings', 'webchain_user_email', [
             'type' => 'string',
             'sanitize_callback' => 'sanitize_email',
@@ -66,7 +66,7 @@ class WebChain_Order_Sync {
     }
 
     public function render_settings_page() {
-        error_log("WebChain: Rendering settings page at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain: Rendering settings page at " . date('Y-m-d H:i:s'));
     ?>
     <div class="wrap webchain-admin-wrap">
         <h1>WebChain Integration</h1>
@@ -103,7 +103,7 @@ class WebChain_Order_Sync {
                             Verify Connection
                         </button>
                         <span id="connection-status" class="webchain-status">
-                            <?php echo get_option('webchain_connection_status', 'Not verified'); ?>
+                            <?php echo esc_html(get_option('webchain_connection_status', 'Not verified')); ?>
                         </span>
                     </td>
                 </tr>
@@ -159,12 +159,12 @@ class WebChain_Order_Sync {
     }
 
     public function handle_completed_order($order_id) {
-        error_log("WebChain: handle_completed_order triggered for Order ID: $order_id at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain: handle_completed_order triggered for Order ID: $order_id at " . date('Y-m-d H:i:s'));
         
         // Check for existing transaction hash to prevent duplicate broadcast
         $existing_tx_hash = get_post_meta($order_id, '_webchain_tx_hash', true);
         if ($existing_tx_hash) {
-            error_log("WebChain: Order $order_id already broadcast with TX Hash: $existing_tx_hash");
+            $this->log("WebChain: Order $order_id already broadcast with TX Hash: $existing_tx_hash");
             return "already_broadcast:$existing_tx_hash";
         }
 
@@ -185,7 +185,7 @@ class WebChain_Order_Sync {
         
         $email = get_option('webchain_user_email');
         $wallet = get_option('webchain_wallet');
-        error_log("WebChain: Order $order_id - Email: $email, Wallet: $wallet, Billing Email: $billing_email");
+        $this->log("WebChain: Order $order_id - Email: $email, Wallet: $wallet, Billing Email: $billing_email");
         
         if (empty($email) || empty($wallet)) {
             $this->log_error($order_id, 'Missing email or wallet configuration');
@@ -211,7 +211,7 @@ class WebChain_Order_Sync {
         $verify_code = wp_remote_retrieve_response_code($verify_response);
         $verify_body = wp_remote_retrieve_body($verify_response);
         $verify_data = json_decode($verify_body, true);
-        error_log("WebChain: Validator verification for Order $order_id - Code: $verify_code, Body: $verify_body");
+        $this->log("WebChain: Validator verification for Order $order_id - Code: $verify_code, Body: $verify_body");
         
         if ($verify_code !== 200) {
             $error_message = $verify_data['message'] ?? 'Validator verification failed';
@@ -243,7 +243,7 @@ class WebChain_Order_Sync {
             ]
         ];
         
-        error_log("WebChain: Sending payload for Order $order_id: " . json_encode($payload));
+        $this->log("WebChain: Sending payload for Order $order_id: " . json_encode($payload));
         
         $response = wp_remote_post($this->api_base . '/process-order', [
             'timeout' => 30,
@@ -260,7 +260,7 @@ class WebChain_Order_Sync {
         $response_code = wp_remote_retrieve_response_code($response);
         $response_headers = wp_remote_retrieve_headers($response);
         $response_body = wp_remote_retrieve_body($response);
-        error_log("WebChain: API Response for Order $order_id - Code: $response_code, Headers: " . json_encode($response_headers->getAll()) . ", Body: $response_body");
+        $this->log("WebChain: API Response for Order $order_id - Code: $response_code, Headers: " . json_encode($response_headers->getAll()) . ", Body: $response_body");
         
         $body = json_decode($response_body, true);
         
@@ -268,7 +268,7 @@ class WebChain_Order_Sync {
         if ($response_code === 200 && (isset($body['tx_hash']) || (isset($body['success']) && $body['success'] && isset($body['data']['tx_hash'])))) {
             $tx_hash = $body['tx_hash'] ?? $body['data']['tx_hash'];
             update_post_meta($order_id, '_webchain_tx_hash', $tx_hash);
-            error_log("WebChain: Order $order_id broadcasted successfully, TX Hash: " . $tx_hash);
+            $this->log("WebChain: Order $order_id broadcasted successfully, TX Hash: " . $tx_hash);
             $this->send_broadcast_notification($order_id, $tx_hash, $billing_email);
             return true;
         }
@@ -279,7 +279,7 @@ class WebChain_Order_Sync {
     }
 
     private function send_broadcast_notification($order_id, $tx_hash, $billing_email) {
-        error_log("WebChain: Sending broadcast notification for Order ID: $order_id, TX Hash: $tx_hash");
+        $this->log("WebChain: Sending broadcast notification for Order ID: $order_id, TX Hash: $tx_hash");
         
         $explorer_url = 'https://e-talk.xyz/webchain?tx=' . $tx_hash; // Updated URL
         $site_name = get_bloginfo('name');
@@ -298,35 +298,53 @@ class WebChain_Order_Sync {
 
         // Admin email
         $admin_subject = sprintf('WebChain Order Broadcast: Order #%s', $order_id);
-        $admin_message = sprintf($email_template, $order_id, $tx_hash, $explorer_url, $site_name);
+        $admin_message = sprintf(
+            $email_template,
+            esc_html($order_id),
+            esc_html($tx_hash),
+            esc_url($explorer_url),
+            esc_html($site_name)
+        );
         $headers = ['Content-Type: text/html; charset=UTF-8'];
         $admin_sent = wp_mail($admin_email, $admin_subject, $admin_message, $headers);
-        error_log("WebChain: Admin email for Order $order_id " . ($admin_sent ? 'sent successfully' : 'failed to send'));
+        $this->log("WebChain: Admin email for Order $order_id " . ($admin_sent ? 'sent successfully' : 'failed to send'));
 
         // Customer email
         if ($billing_email !== 'guest@example.com') {
             $customer_subject = sprintf('Your Order #%s Has Been Recorded on WebChain', $order_id);
-            $customer_message = sprintf($email_template, $order_id, $tx_hash, $explorer_url, $site_name);
+            $customer_message = sprintf(
+                $email_template,
+                esc_html($order_id),
+                esc_html($tx_hash),
+                esc_url($explorer_url),
+                esc_html($site_name)
+            );
             $customer_sent = wp_mail($billing_email, $customer_subject, $customer_message, $headers);
-            error_log("WebChain: Customer email for Order $order_id to $billing_email " . ($customer_sent ? 'sent successfully' : 'failed to send'));
+            $this->log("WebChain: Customer email for Order $order_id to $billing_email " . ($customer_sent ? 'sent successfully' : 'failed to send'));
         } else {
-            error_log("WebChain: Skipped customer email for Order $order_id (guest order)");
+            $this->log("WebChain: Skipped customer email for Order $order_id (guest order)");
+        }
+    }
+    
+    private function log($message) {
+        if (defined('WEBCHAIN_DEBUG') && WEBCHAIN_DEBUG) {
+            error_log('[WebChain] ' . $message);
         }
     }
     
     public function ajax_broadcast_order() {
-        error_log("WebChain: AJAX broadcast_order started at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain: AJAX broadcast_order started at " . date('Y-m-d H:i:s'));
         check_ajax_referer('webchain_broadcast_order', 'security');
         if (!current_user_can('edit_shop_orders')) {
-            error_log("WebChain: AJAX broadcast_order failed: Unauthorized");
+            $this->log("WebChain: AJAX broadcast_order failed: Unauthorized");
             wp_send_json_error('Unauthorized', 403);
         }
 
         $order_id = absint($_REQUEST['order_id']);
-        error_log("WebChain: AJAX broadcast_order for Order ID: $order_id");
+        $this->log("WebChain: AJAX broadcast_order for Order ID: $order_id");
         $order = wc_get_order($order_id);
         if (!$order) {
-            error_log("WebChain: AJAX broadcast_order failed: Order $order_id not found");
+            $this->log("WebChain: AJAX broadcast_order failed: Order $order_id not found");
             wp_send_json_error('Order not found', 404);
         }
 
@@ -340,23 +358,23 @@ class WebChain_Order_Sync {
         } else {
             $error_message = get_option('webchain_sync_errors', []);
             $last_error = end($error_message) ? end($error_message)['message'] : 'Broadcast failed: Check error logs';
-            error_log("WebChain: AJAX broadcast_order failed for Order $order_id: $last_error");
+            $this->log("WebChain: AJAX broadcast_order failed for Order $order_id: $last_error");
             wp_send_json_error($last_error, 500);
         }
     }
 
     public function test_broadcast() {
-        error_log("WebChain: AJAX test_broadcast started at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain: AJAX test_broadcast started at " . date('Y-m-d H:i:s'));
         check_ajax_referer('webchain_ajax_nonce', 'security');
         if (!current_user_can('edit_shop_orders')) {
-            error_log("WebChain: AJAX test_broadcast failed: Unauthorized");
+            $this->log("WebChain: AJAX test_broadcast failed: Unauthorized");
             wp_send_json_error('Unauthorized', 403);
         }
         $order_id = absint($_POST['order_id']);
-        error_log("WebChain: AJAX test_broadcast for Order ID: $order_id");
+        $this->log("WebChain: AJAX test_broadcast for Order ID: $order_id");
         $order = wc_get_order($order_id);
         if (!$order) {
-            error_log("WebChain: AJAX test_broadcast failed: Order $order_id not found");
+            $this->log("WebChain: AJAX test_broadcast failed: Order $order_id not found");
             wp_send_json_error('Order not found', 404);
         }
         $result = $this->handle_completed_order($order_id);
@@ -369,28 +387,28 @@ class WebChain_Order_Sync {
         } else {
             $error_message = get_option('webchain_sync_errors', []);
             $last_error = end($error_message) ? end($error_message)['message'] : 'Test broadcast failed: Check error logs';
-            error_log("WebChain: AJAX test_broadcast failed for Order $order_id: $last_error");
+            $this->log("WebChain: AJAX test_broadcast failed for Order $order_id: $last_error");
             wp_send_json_error($last_error, 500);
         }
     }
 
     public function clear_error_logs() {
-        error_log("WebChain: AJAX clear_error_logs started at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain: AJAX clear_error_logs started at " . date('Y-m-d H:i:s'));
         check_ajax_referer('webchain_ajax_nonce', 'security');
         if (!current_user_can('manage_options')) {
-            error_log("WebChain: AJAX clear_error_logs failed: Unauthorized");
+            $this->log("WebChain: AJAX clear_error_logs failed: Unauthorized");
             wp_send_json_error('Unauthorized', 403);
         }
 
         update_option('webchain_sync_errors', []);
-        error_log("WebChain: Error logs cleared successfully");
+        $this->log("WebChain: Error logs cleared successfully");
         wp_send_json_success('Error logs cleared successfully');
     }
 
     public function add_order_action($actions, $order) {
         $order_id = $order->get_id();
         $tx_hash = get_post_meta($order_id, '_webchain_tx_hash', true);
-        error_log("WebChain: Adding action for Order ID: $order_id, TX Hash: " . ($tx_hash ?: 'None'));
+        $this->log("WebChain: Adding action for Order ID: $order_id, TX Hash: " . ($tx_hash ?: 'None'));
     
         if ($tx_hash) {
             $actions['webchain_view'] = [
@@ -414,13 +432,13 @@ class WebChain_Order_Sync {
     }
 
     public function test_connection() {
-        error_log("WebChain: AJAX test_connection started at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain: AJAX test_connection started at " . date('Y-m-d H:i:s'));
         check_ajax_referer('webchain_ajax_nonce', 'security');
         $email = sanitize_email($_POST['email']);
         $wallet = $this->sanitize_wallet($_POST['wallet']);
         
         if (empty($email) || empty($wallet)) {
-            error_log("WebChain: AJAX test_connection failed: Email or wallet missing");
+            $this->log("WebChain: AJAX test_connection failed: Email or wallet missing");
             wp_send_json_error('Email and wallet are required', 400);
         }
         
@@ -435,19 +453,19 @@ class WebChain_Order_Sync {
         
         if (is_wp_error($response)) {
             $error_message = 'API request failed: ' . $response->get_error_message();
-            error_log("WebChain: AJAX test_connection failed: $error_message");
+            $this->log("WebChain: AJAX test_connection failed: $error_message");
             wp_send_json_error($error_message, 500);
         }
         
         $response_code = wp_remote_retrieve_response_code($response);
         $response_headers = wp_remote_retrieve_headers($response);
         $response_body = wp_remote_retrieve_body($response);
-        error_log("WebChain: Verify Validator Response - Code: $response_code, Headers: " . json_encode($response_headers->getAll()) . ", Body: $response_body");
+        $this->log("WebChain: Verify Validator Response - Code: $response_code, Headers: " . json_encode($response_headers->getAll()) . ", Body: $response_body");
         
         $body = json_decode($response_body, true);
         
         if ($response_code !== 200) {
-            error_log("WebChain: AJAX test_connection failed: " . ($body['message'] ?? 'Verification failed'));
+            $this->log("WebChain: AJAX test_connection failed: " . ($body['message'] ?? 'Verification failed'));
             wp_send_json_error($body['message'] ?? 'Verification failed', $response_code);
         }
         
@@ -463,7 +481,7 @@ class WebChain_Order_Sync {
 
     public function enqueue_assets($hook) {
         global $post_type;
-        error_log("WebChain: Enqueue assets called on hook: $hook, Post type: " . ($post_type ?: 'none') . " at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain: Enqueue assets called on hook: $hook, Post type: " . ($post_type ?: 'none') . " at " . date('Y-m-d H:i:s'));
         if ('toplevel_page_webchain-sync' === $hook || 'shop_order' === $post_type || 'edit.php' === $hook) {
             wp_enqueue_style(
                 'webchain-admin',
@@ -487,17 +505,19 @@ class WebChain_Order_Sync {
         }
     }
 
-    public function add_order_action_style() {
-        error_log("WebChain: Adding order action styles at " . date('Y-m-d H:i:s'));
-        echo '<style>
-            .webchain-broadcast::after { content: "\f237"; font-family: dashicons; }
-            .webchain-view::after { content: "\f177"; font-family: dashicons; }
+    public function add_order_action_style($hook) {
+        $custom_css = "
+            .webchain-broadcast::after { content: '\\f237'; font-family: dashicons; }
+            .webchain-view::after { content: '\\f177'; font-family: dashicons; }
             .webchain-broadcast, .webchain-view { display: inline-block !important; visibility: visible !important; }
-        </style>';
+        ";
+        wp_register_style('webchain-inline-style', false);
+        wp_enqueue_style('webchain-inline-style');
+        wp_add_inline_style('webchain-inline-style', $custom_css);
     }
 
     private function log_error($order_id, $message) {
-        error_log("WebChain Sync Error [Order $order_id]: $message at " . date('Y-m-d H:i:s'));
+        $this->log("WebChain Sync Error [Order $order_id]: $message at " . date('Y-m-d H:i:s'));
         $errors = get_option('webchain_sync_errors', []);
         $errors[] = [
             'time' => current_time('mysql'),
@@ -509,8 +529,20 @@ class WebChain_Order_Sync {
 
     public function sanitize_wallet($wallet) {
         $wallet = strtolower(sanitize_text_field($wallet));
-        return preg_match('/^0x[a-f0-9]{40}$/', $wallet) ? $wallet : '';
+           return preg_match('/^0x[a-f0-9]{40}$/', $wallet) ? $wallet : '';
+        }
     }
-}
 
+
+    add_action('admin_init', function() {
+        if (function_exists('wp_add_privacy_policy_content')) {
+            $content = '<p><strong>WebChain Order Sync:</strong> This plugin sends order data 
+            (Order ID, order total, currency, customer ID, customer email, and product details) 
+            to the E-Talk WebChain API (https://e-talk.xyz/) for decentralized order recording. 
+            No payment card details, shipping addresses, or sensitive personal data are transmitted. 
+            Site administrators should include this information in their site\'s privacy policy.</p>';
+
+            wp_add_privacy_policy_content('WebChain Order Sync', wp_kses_post($content));
+        }
+    });
 new WebChain_Order_Sync();
